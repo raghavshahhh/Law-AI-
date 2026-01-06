@@ -24,22 +24,283 @@ model UserApp {
   updatedAt       DateTime  @updatedAt @map("updated_at")
 
   // Relations
-  payments     Payment[]
-  usageEvents  UsageEvent[]
-  research     Research[]
-  drafts       Draft[]
-  summaries    Summary[]
-  caseTracker  CaseTracker[]
-  notices      Notice[]
-  crm          CRM[]
-  acts         Act[]
-  news         News[]
-  chatSessions ChatSession[]
+  payments      Payment[]
+  usageEvents   UsageEvent[]
+  research      Research[]
+  drafts        Draft[]
+  summaries     Summary[]
+  caseTracker   CaseTracker[]
+  notices       Notice[]
+  crm           CRM[]
+  acts          Act[]
+  news          News[]
+  chatSessions  ChatSession[]
   uploadedFiles UploadedFile[]
-  auditLogs    AuditLog[]
+  auditLogs     AuditLog[]
+  cases         Case[]
+  clients       Client[]
 
   @@map("users_app")
 }
+
+// ============================================
+// CASE-CENTRIC ARCHITECTURE - CORE MODELS
+// ============================================
+
+// Case - The central entity everything revolves around
+model Case {
+  id              String       @id @default(uuid()) @db.Uuid
+  userId          String       @map("user_id") @db.Uuid
+  
+  // Basic Info
+  title           String       // Case title/name
+  cnrNumber       String?      @map("cnr_number") // CNR if tracked
+  caseNumber      String?      @map("case_number") // Court case number
+  caseType        CaseType     @default(GENERAL) @map("case_type")
+  
+  // Court Details
+  court           String?      // Court name
+  judge           String?      // Assigned judge
+  courtRoom       String?      @map("court_room")
+  
+  // Parties
+  petitioner      String?      // Petitioner/Plaintiff name
+  respondent      String?      // Respondent/Defendant name
+  clientId        String?      @map("client_id") @db.Uuid
+  clientRole      ClientRole?  @map("client_role") // Is client petitioner or respondent?
+  
+  // Status & Dates
+  status          CaseStatus   @default(OPEN)
+  stage           CaseStage    @default(FILING)
+  filingDate      DateTime?    @map("filing_date")
+  nextHearing     DateTime?    @map("next_hearing")
+  disposedDate    DateTime?    @map("disposed_date")
+  
+  // AI Generated
+  aiSummary       String?      @map("ai_summary") // AI-generated case summary
+  aiPrediction    String?      @map("ai_prediction") // AI predicted next steps
+  
+  // Metadata
+  priority        Priority     @default(MEDIUM)
+  tags            String[]     @default([])
+  notes           String?      // General notes
+  details         Json?        // Additional flexible data
+  
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+
+  // Relations
+  user            UserApp      @relation(fields: [userId], references: [userId], onDelete: Cascade)
+  client          Client?      @relation(fields: [clientId], references: [id])
+  activities      CaseActivity[]
+  hearings        Hearing[]
+  documents       CaseDocument[]
+
+  @@unique([userId, cnrNumber])
+  @@index([userId, status])
+  @@index([userId, nextHearing])
+  @@map("cases")
+}
+
+// CaseActivity - Timeline of all activities (THE BACKBONE)
+model CaseActivity {
+  id          String         @id @default(uuid()) @db.Uuid
+  caseId      String         @map("case_id") @db.Uuid
+  userId      String         @map("user_id") @db.Uuid
+  
+  // Activity Type
+  type        ActivityType
+  feature     FeatureType?   // Which feature created this
+  
+  // Content
+  title       String         // Short title
+  content     String         // Main content (AI response, draft content, etc.)
+  metadata    Json?          // Additional data (inputs, citations, etc.)
+  
+  // References
+  referenceId String?        @map("reference_id") // ID of related entity (draft, summary, etc.)
+  
+  createdAt   DateTime       @default(now()) @map("created_at")
+
+  case        Case           @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId, createdAt])
+  @@index([caseId, type])
+  @@map("case_activities")
+}
+
+// Hearing - Court hearings for a case
+model Hearing {
+  id          String        @id @default(uuid()) @db.Uuid
+  caseId      String        @map("case_id") @db.Uuid
+  
+  date        DateTime
+  time        String?
+  purpose     String?       // Purpose of hearing
+  courtRoom   String?       @map("court_room")
+  judge       String?
+  
+  // Outcome
+  status      HearingStatus @default(SCHEDULED)
+  outcome     String?       // What happened
+  nextSteps   String?       @map("next_steps")
+  orderSummary String?      @map("order_summary") // AI summary of order
+  
+  // Reminders
+  reminderSent Boolean      @default(false) @map("reminder_sent")
+  
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+
+  case        Case          @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId, date])
+  @@map("hearings")
+}
+
+// CaseDocument - Documents attached to a case
+model CaseDocument {
+  id          String       @id @default(uuid()) @db.Uuid
+  caseId      String       @map("case_id") @db.Uuid
+  
+  name        String
+  type        DocumentType
+  fileUrl     String?      @map("file_url")
+  content     String?      // Extracted text content
+  summary     String?      // AI summary
+  
+  createdAt   DateTime     @default(now()) @map("created_at")
+
+  case        Case         @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId])
+  @@map("case_documents")
+}
+
+// Client - CRM linked to cases
+model Client {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  
+  name        String
+  email       String?
+  phone       String?
+  address     String?
+  
+  // Payment tracking
+  totalBilled Decimal?  @map("total_billed") @db.Decimal(10, 2)
+  totalPaid   Decimal?  @map("total_paid") @db.Decimal(10, 2)
+  
+  notes       String?
+  tags        String[]  @default([])
+  
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  user        UserApp   @relation(fields: [userId], references: [userId], onDelete: Cascade)
+  cases       Case[]
+
+  @@index([userId])
+  @@map("clients")
+}
+
+// ============================================
+// ENUMS FOR CASE-CENTRIC SYSTEM
+// ============================================
+
+enum CaseType {
+  GENERAL
+  CRIMINAL
+  CIVIL
+  FAMILY
+  PROPERTY
+  CONSUMER
+  LABOUR
+  TAX
+  CORPORATE
+  WRIT
+  ARBITRATION
+  CHEQUE_BOUNCE
+}
+
+enum CaseStatus {
+  OPEN
+  PENDING
+  HEARING
+  RESERVED
+  DISPOSED
+  ARCHIVED
+  CLOSED
+}
+
+enum CaseStage {
+  FILING
+  NOTICE
+  APPEARANCE
+  FRAMING_ISSUES
+  EVIDENCE
+  ARGUMENTS
+  RESERVED
+  JUDGMENT
+  APPEAL
+  EXECUTION
+}
+
+enum ClientRole {
+  PETITIONER
+  RESPONDENT
+  COMPLAINANT
+  ACCUSED
+  PLAINTIFF
+  DEFENDANT
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum ActivityType {
+  AI_CHAT
+  DRAFT_CREATED
+  SUMMARY_CREATED
+  DOCUMENT_UPLOADED
+  HEARING_ADDED
+  HEARING_UPDATED
+  STATUS_CHANGED
+  NOTE_ADDED
+  RESEARCH_DONE
+  NOTICE_CREATED
+  CLIENT_LINKED
+  CASE_CREATED
+  CASE_UPDATED
+}
+
+enum HearingStatus {
+  SCHEDULED
+  COMPLETED
+  ADJOURNED
+  CANCELLED
+}
+
+enum DocumentType {
+  PETITION
+  REPLY
+  REJOINDER
+  AFFIDAVIT
+  EVIDENCE
+  ORDER
+  JUDGMENT
+  NOTICE
+  DRAFT
+  OTHER
+}
+
+// ============================================
+// EXISTING MODELS (Updated with case linkage)
+// ============================================
 
 // Payment records
 model Payment {
@@ -75,10 +336,11 @@ model UsageEvent {
   @@map("usage_events")
 }
 
-// Research queries
+// Research queries - NOW WITH CASE LINKAGE
 model Research {
   id        String   @id @default(uuid()) @db.Uuid
   userId    String   @map("user_id") @db.Uuid
+  caseId    String?  @map("case_id") @db.Uuid // Case linkage
   query     String
   result    String
   type      String   @default("general")
@@ -87,13 +349,15 @@ model Research {
   user UserApp @relation(fields: [userId], references: [userId], onDelete: Cascade)
 
   @@index([userId, createdAt])
+  @@index([caseId])
   @@map("research")
 }
 
-// Legal drafts
+// Legal drafts - NOW WITH CASE LINKAGE
 model Draft {
   id        String   @id @default(uuid()) @db.Uuid
   userId    String   @map("user_id") @db.Uuid
+  caseId    String?  @map("case_id") @db.Uuid // Case linkage
   type      String
   title     String
   content   String
@@ -105,13 +369,15 @@ model Draft {
   user UserApp @relation(fields: [userId], references: [userId], onDelete: Cascade)
 
   @@index([userId])
+  @@index([caseId])
   @@map("drafts")
 }
 
-// Judgment summaries
+// Judgment summaries - NOW WITH CASE LINKAGE
 model Summary {
   id           String   @id @default(uuid()) @db.Uuid
   userId       String   @map("user_id") @db.Uuid
+  caseId       String?  @map("case_id") @db.Uuid // Case linkage
   title        String
   originalText String   @map("original_text")
   summary      String
@@ -121,10 +387,11 @@ model Summary {
   user UserApp @relation(fields: [userId], references: [userId], onDelete: Cascade)
 
   @@index([userId])
+  @@index([caseId])
   @@map("summaries")
 }
 
-// Case tracking
+// Case tracking (legacy - will migrate to Case model)
 model CaseTracker {
   id         String    @id @default(uuid()) @db.Uuid
   userId     String    @map("user_id") @db.Uuid
@@ -143,10 +410,11 @@ model CaseTracker {
   @@map("case_tracker")
 }
 
-// Legal notices
+// Legal notices - NOW WITH CASE LINKAGE
 model Notice {
   id        String   @id @default(uuid()) @db.Uuid
   userId    String   @map("user_id") @db.Uuid
+  caseId    String?  @map("case_id") @db.Uuid // Case linkage
   type      String
   title     String
   content   String
@@ -158,10 +426,11 @@ model Notice {
 
   user UserApp @relation(fields: [userId], references: [userId], onDelete: Cascade)
 
+  @@index([caseId])
   @@map("notices")
 }
 
-// CRM data
+// CRM data (legacy - will use Client model)
 model CRM {
   id          String    @id @default(uuid()) @db.Uuid
   userId      String    @map("user_id") @db.Uuid
@@ -217,11 +486,11 @@ model News {
   @@map("news")
 }
 
-// Chat sessions
+// Chat sessions - NOW WITH PROPER CASE LINKAGE
 model ChatSession {
   id        String        @id @default(uuid()) @db.Uuid
   userId    String        @map("user_id") @db.Uuid
-  caseId    String?       @map("case_id") @db.Uuid
+  caseId    String?       @map("case_id") @db.Uuid // Proper case linkage
   title     String
   messages  ChatMessage[]
   createdAt DateTime      @default(now()) @map("created_at")
@@ -254,6 +523,7 @@ model ChatMessage {
 model UploadedFile {
   id         String   @id @default(uuid()) @db.Uuid
   userId     String   @map("user_id") @db.Uuid
+  caseId     String?  @map("case_id") @db.Uuid // Case linkage
   filename   String
   fileType   String   @map("file_type")
   fileSize   Int      @map("file_size")
@@ -263,6 +533,7 @@ model UploadedFile {
   user UserApp @relation(fields: [userId], references: [userId], onDelete: Cascade)
 
   @@index([userId])
+  @@index([caseId])
   @@map("uploaded_files")
 }
 

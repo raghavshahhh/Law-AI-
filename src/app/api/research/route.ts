@@ -1,15 +1,15 @@
+export const dynamic = "force-dynamic"
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/prisma'
+import { safeDbOperation } from '@/lib/prisma'
 import { callAIService } from '@/lib/ai-service'
+import { getServerUser } from '@/lib/auth'
+import { logResearch } from '@/lib/case-activity'
 
-export const runtime = 'nodejs'
-export const dynamic = 'force-dynamic'
-
-// POST - Create new research query with AI
 export async function POST(request: NextRequest) {
   try {
+    const user = await getServerUser().catch(() => null)
     const body = await request.json()
-    const { query } = body
+    const { query, caseId } = body
 
     if (!query || typeof query !== 'string' || query.trim().length < 2) {
       return NextResponse.json({ 
@@ -19,18 +19,36 @@ export async function POST(request: NextRequest) {
     }
 
     const sanitizedQuery = query.trim().substring(0, 500)
+    const userId = user?.id || 'anonymous'
+
+    // Build context-aware prompt if case is linked
+    let caseContext = ''
+    if (caseId && user) {
+      const caseData = await safeDbOperation(async () => {
+        const { prisma } = await import('@/lib/prisma')
+        if (!prisma) return null
+        return prisma.case.findFirst({
+          where: { id: caseId, userId: user.id },
+          select: { title: true, caseType: true, court: true, petitioner: true, respondent: true }
+        }).catch(() => null)
+      }, null)
+      
+      if (caseData) {
+        caseContext = `\n\n[Research Context: Case "${caseData.title}", Type: ${caseData.caseType}, Court: ${caseData.court || 'N/A'}]`
+      }
+    }
 
     // Generate AI-powered legal research
     const messages = [
       {
         role: 'system' as const,
         content: `You are a legal research expert specializing in Indian law. Provide comprehensive, accurate legal analysis including:
-- Relevant statutory provisions (IPC, CrPC, Constitution, etc.)
-- Key case laws and precedents
+- Relevant statutory provisions (IPC, CrPC, CPC, Constitution, NI Act, etc.)
+- Key case laws and precedents with citations
 - Legal principles and interpretations
-- Practical implications
+- Practical implications for lawyers
 
-Format your response clearly with sections. Do not use asterisks for formatting.`
+Format your response clearly with sections. Be specific and cite actual sections/cases.${caseContext}`
       },
       {
         role: 'user' as const,
@@ -38,35 +56,42 @@ Format your response clearly with sections. Do not use asterisks for formatting.
       }
     ]
 
-    const aiResponse = await callAIService(messages, 'FREE', 2000, 0.5)
+    const aiResponse = await callAIService(messages, user ? 'PRO' : 'FREE', 2000, 0.5)
     const result = aiResponse.content
 
     if (!result) {
       throw new Error('No response from AI service')
     }
 
-    // Try to save to database
-    let savedResearch = null
-    try {
-      if (prisma) {
-        savedResearch = await prisma.research.create({
-          data: {
-            userId: 'anonymous',
-            query: sanitizedQuery,
-            result: result,
-            type: 'all'
-          }
-        })
-      }
-    } catch (dbError) {
-      console.warn('Database save failed:', dbError)
+
+    // Save to database
+    const savedResearch = await safeDbOperation(async () => {
+      const { prisma } = await import('@/lib/prisma')
+      if (!prisma) throw new Error('Database unavailable')
+      
+      return prisma.research.create({
+        data: {
+          userId,
+          query: sanitizedQuery,
+          result,
+          type: 'all',
+          caseId: caseId || null
+        }
+      })
+    }, null)
+
+    // Log to case timeline if case is linked
+    if (savedResearch && caseId && user) {
+      await logResearch(caseId, user.id, sanitizedQuery, result, savedResearch.id)
     }
 
     return NextResponse.json({
       ok: true,
       id: savedResearch?.id || `temp-${Date.now()}`,
       query: sanitizedQuery,
-      result: result,
+      result,
+      content: result, // Alias for compatibility
+      caseId,
       createdAt: savedResearch?.createdAt || new Date().toISOString()
     })
   } catch (error: any) {
@@ -78,23 +103,35 @@ Format your response clearly with sections. Do not use asterisks for formatting.
   }
 }
 
-// GET - Fetch research history
 export async function GET(request: NextRequest) {
   try {
-    if (!prisma) {
-      return NextResponse.json([])
-    }
+    const user = await getServerUser().catch(() => null)
+    const { searchParams } = new URL(request.url)
+    const caseId = searchParams.get('caseId')
+    const userId = user?.id || 'anonymous'
 
-    const research = await prisma.research.findMany({
-      orderBy: { createdAt: 'desc' },
-      take: 20,
-      select: {
-        id: true,
-        query: true,
-        result: true,
-        createdAt: true
+    const research = await safeDbOperation(async () => {
+      const { prisma } = await import('@/lib/prisma')
+      if (!prisma) return []
+      
+      const whereClause: any = { userId }
+      if (caseId) {
+        whereClause.caseId = caseId
       }
-    })
+      
+      return prisma.research.findMany({
+        where: whereClause,
+        orderBy: { createdAt: 'desc' },
+        take: 20,
+        select: {
+          id: true,
+          query: true,
+          result: true,
+          caseId: true,
+          createdAt: true
+        }
+      })
+    }, [])
 
     return NextResponse.json(research)
   } catch (error) {

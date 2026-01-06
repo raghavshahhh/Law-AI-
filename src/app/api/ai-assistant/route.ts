@@ -2,6 +2,7 @@ export const dynamic = "force-dynamic"
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerUser } from '@/lib/auth'
 import { safeDbOperation } from '@/lib/prisma'
+import { logAIChat } from '@/lib/case-activity'
 
 // REFINED Indian Law System Prompt - Optimized for Lawyers
 const INDIAN_LAW_SYSTEM_PROMPT = `You are LAW.AI, an Indian legal assistant for advocates.
@@ -45,18 +46,23 @@ You are helpful, accurate, and focused on actionable legal guidance.`
 function buildCaseContext(caseData: any): string {
   if (!caseData) return ''
   
-  let context = `\n\n[CASE CONTEXT]\n`
-  context += `CNR: ${caseData.cnrNumber}\n`
+  let context = `\n\n[ACTIVE CASE CONTEXT]\n`
+  context += `Title: ${caseData.title || 'N/A'}\n`
+  if (caseData.cnrNumber) context += `CNR: ${caseData.cnrNumber}\n`
   if (caseData.caseType) context += `Type: ${caseData.caseType}\n`
   if (caseData.court) context += `Court: ${caseData.court}\n`
+  if (caseData.judge) context += `Judge: ${caseData.judge}\n`
   if (caseData.petitioner) context += `Petitioner: ${caseData.petitioner}\n`
   if (caseData.respondent) context += `Respondent: ${caseData.respondent}\n`
   if (caseData.status) context += `Status: ${caseData.status}\n`
+  if (caseData.stage) context += `Stage: ${caseData.stage}\n`
   if (caseData.nextHearing) context += `Next Hearing: ${caseData.nextHearing}\n`
-  context += `\nProvide advice relevant to this specific case when applicable.`
+  if (caseData.aiSummary) context += `Case Summary: ${caseData.aiSummary}\n`
+  context += `\nProvide advice specifically relevant to this case context when applicable.`
   
   return context
 }
+
 
 export async function GET(request: NextRequest) {
   try {
@@ -72,10 +78,9 @@ export async function GET(request: NextRequest) {
       const { prisma } = await import('@/lib/prisma')
       if (!prisma) throw new Error('Database unavailable')
       
-      // Filter by case ID in title if provided (workaround until schema migration)
       const whereClause: any = { userId: user.id }
       if (caseId) {
-        whereClause.title = { contains: `[case:${caseId}]` }
+        whereClause.caseId = caseId
       }
       
       const sessions = await prisma.chatSession.findMany({
@@ -91,17 +96,13 @@ export async function GET(request: NextRequest) {
       })
 
       return sessions.flatMap(session => {
-        // Extract caseId from title if present
-        const titleMatch = session.title.match(/\[case:([^\]]+)\]/)
-        const sessionCaseId = titleMatch ? titleMatch[1] : null
-        
         return session.messages
           .filter(msg => msg.role === 'user')
           .map(msg => ({
             id: msg.id,
             prompt: msg.content,
             createdAt: msg.createdAt.toISOString(),
-            caseId: sessionCaseId
+            caseId: session.caseId
           }))
       })
     }, [])
@@ -128,20 +129,44 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Prompt is required' }, { status: 400 })
     }
 
-    // Fetch case data if caseId provided (from CaseTracker model)
+    // Fetch case data if caseId provided
     let caseData = null
     if (caseId) {
       caseData = await safeDbOperation(async () => {
         const { prisma } = await import('@/lib/prisma')
         if (!prisma) return null
+        
+        // Try new Case model first
+        let caseRecord = await prisma.case.findFirst({
+          where: { id: caseId, userId: user.id }
+        }).catch(() => null)
+        
+        if (caseRecord) {
+          return {
+            title: caseRecord.title,
+            cnrNumber: caseRecord.cnrNumber,
+            caseType: caseRecord.caseType,
+            court: caseRecord.court,
+            judge: caseRecord.judge,
+            status: caseRecord.status,
+            stage: caseRecord.stage,
+            nextHearing: caseRecord.nextHearing?.toISOString().split('T')[0],
+            petitioner: caseRecord.petitioner,
+            respondent: caseRecord.respondent,
+            aiSummary: caseRecord.aiSummary
+          }
+        }
+        
+        // Fallback to CaseTracker
         const tracker = await prisma.caseTracker.findUnique({
           where: { id: caseId }
-        })
+        }).catch(() => null)
+        
         if (!tracker) return null
         
-        // Map CaseTracker fields to expected format
         const details = tracker.details as any || {}
         return {
+          title: tracker.partyName,
           cnrNumber: tracker.cnr,
           caseType: details.caseType || 'General',
           court: tracker.court,
@@ -159,12 +184,11 @@ export async function POST(request: NextRequest) {
       systemPrompt += buildCaseContext(caseData)
     }
 
-    // Build conversation history for context
+    // Build conversation history
     const conversationHistory: Array<{ role: 'system' | 'user' | 'assistant', content: string }> = [
       { role: 'system', content: systemPrompt }
     ]
 
-    // Add previous messages for context (last 6 messages)
     if (history && Array.isArray(history)) {
       history.slice(-6).forEach((msg: { role: string, content: string }) => {
         if (msg.role === 'user' || msg.role === 'assistant') {
@@ -176,13 +200,11 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    // Add current user message
     conversationHistory.push({ role: 'user', content: userPrompt })
 
     // Get AI response
     const { callAIService } = await import('@/lib/ai-service')
     
-    // Get user plan
     let userPlan = 'FREE'
     try {
       const { prisma } = await import('@/lib/prisma')
@@ -197,39 +219,30 @@ export async function POST(request: NextRequest) {
       console.log('Could not fetch user plan, using FREE')
     }
     
-    // Generate AI response
-    const aiResponse = await callAIService(
-      conversationHistory,
-      userPlan,
-      2000,
-      0.7
-    )
-    
+    const aiResponse = await callAIService(conversationHistory, userPlan, 2000, 0.7)
     const response = aiResponse.content
 
-    // Save to database with case linkage (store caseId in title as workaround)
+    // Save to database
     const savedData = await safeDbOperation(async () => {
       const { prisma } = await import('@/lib/prisma')
       if (!prisma) return null
       
-      // Build title with case ID embedded
-      const titlePrefix = caseId ? `[case:${caseId}] ` : ''
-      const titleContent = userPrompt.substring(0, 45) + (userPrompt.length > 45 ? '...' : '')
+      const titleContent = userPrompt.substring(0, 50) + (userPrompt.length > 50 ? '...' : '')
       
-      // Create or get existing session for this case
-      let session = await prisma.chatSession.findFirst({
-        where: { 
-          userId: user.id,
-          ...(caseId ? { title: { contains: `[case:${caseId}]` } } : {})
-        },
-        orderBy: { updatedAt: 'desc' }
-      })
+      // Find or create session for this case
+      let session = caseId 
+        ? await prisma.chatSession.findFirst({
+            where: { userId: user.id, caseId },
+            orderBy: { updatedAt: 'desc' }
+          })
+        : null
 
       if (!session) {
         session = await prisma.chatSession.create({
           data: {
             userId: user.id,
-            title: titlePrefix + titleContent
+            caseId: caseId || null,
+            title: titleContent
           }
         })
       }
@@ -258,31 +271,9 @@ export async function POST(request: NextRequest) {
         })
       ])
 
-      // Update case tracker with last AI interaction
+      // Log to case timeline if case is linked
       if (caseId) {
-        try {
-          const existingTracker = await prisma.caseTracker.findUnique({
-            where: { id: caseId },
-            select: { details: true }
-          })
-          
-          const existingDetails = (existingTracker?.details as any) || {}
-          
-          await prisma.caseTracker.update({
-            where: { id: caseId },
-            data: { 
-              lastUpdate: new Date(),
-              details: {
-                ...existingDetails,
-                lastAiQuery: userPrompt.substring(0, 200),
-                lastAiQueryAt: new Date().toISOString()
-              }
-            }
-          })
-        } catch (e) {
-          // Non-critical, continue
-          console.log('Could not update case tracker:', e)
-        }
+        await logAIChat(caseId, user.id, userPrompt, response)
       }
       
       return { sessionId: session.id, messageId: assistantMsg.id }
