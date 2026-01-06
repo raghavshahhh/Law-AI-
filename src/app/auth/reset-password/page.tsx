@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { supabase } from '@/lib/supabase'
+import { getSupabase } from '@/lib/supabase'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -23,6 +23,7 @@ export default function ResetPasswordPage() {
   useEffect(() => {
     const handleAuthStateChange = async () => {
       try {
+        const supabase = getSupabase()
         setIsCheckingSession(true)
         
         // First, check if there are tokens in the URL hash (from email link)
@@ -99,6 +100,7 @@ export default function ResetPasswordPage() {
     setLoading(true)
 
     try {
+      const supabase = getSupabase()
       console.log('Updating password...')
       
       // Update the user's password

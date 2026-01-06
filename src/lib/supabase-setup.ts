@@ -1,12 +1,8 @@
-import { createClient } from '@supabase/supabase-js'
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-)
+import { getSupabaseAdmin } from './supabase-server'
 
 export async function setupNotificationsTable() {
   try {
+    const supabase = getSupabaseAdmin()
     console.log('🔧 Setting up notifications table...')
 
     // Create notifications table
@@ -81,6 +77,7 @@ export async function setupNotificationsTable() {
 
 export async function createWelcomeNotification(userId: string, userName: string) {
   try {
+    const supabase = getSupabaseAdmin()
     const { data, error } = await supabase
       .from('notifications')
       .insert({

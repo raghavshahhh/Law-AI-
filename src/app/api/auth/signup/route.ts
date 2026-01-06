@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabase } from '@/lib/supabase'
+import { getSupabaseAdmin } from '@/lib/supabase-server'
 
 export async function POST(request: NextRequest) {
   try {
+    const supabase = getSupabaseAdmin()
     const { email, password, fullName } = await request.json()
 
     if (!email || !password) {

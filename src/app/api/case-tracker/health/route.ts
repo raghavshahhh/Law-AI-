@@ -1,15 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
+import { getSupabaseAdmin } from '@/lib/supabase-server'
 
 export const dynamic = 'force-dynamic'
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-)
-
 export async function GET(request: NextRequest) {
   try {
+    const supabase = getSupabaseAdmin()
+    
     const { data: { user } } = await supabase.auth.getUser(
       request.cookies.get('sb-access-token')?.value || ''
     )
@@ -42,7 +39,6 @@ export async function GET(request: NextRequest) {
       .from('drafts')
       .select('*', { count: 'exact', head: true })
       .eq('user_id', user.id)
-    // Note: In production, filter by caseId when drafts table has case_id column
 
     // Count AI assists (chat sessions)
     const { count: aiAssists } = await supabase
@@ -60,15 +56,13 @@ export async function GET(request: NextRequest) {
     const details = caseData.details || {}
     const timeline = details.timeline || []
     
-    let healthScore = 20 // Base score for having a case
-    healthScore += Math.min((documentsGenerated || 0) * 10, 30) // Up to 30 for docs
-    healthScore += Math.min((aiAssists || 0) * 5, 25) // Up to 25 for AI
-    healthScore += Math.min((filesUploaded || 0) * 5, 15) // Up to 15 for files
-    healthScore += Math.min(timeline.length * 2, 10) // Up to 10 for timeline activity
+    let healthScore = 20
+    healthScore += Math.min((documentsGenerated || 0) * 10, 30)
+    healthScore += Math.min((aiAssists || 0) * 5, 25)
+    healthScore += Math.min((filesUploaded || 0) * 5, 15)
+    healthScore += Math.min(timeline.length * 2, 10)
     healthScore = Math.min(healthScore, 100)
 
-    // Estimate time saved (rough calculation)
-    // Assume: 15 min per draft, 5 min per AI assist, 2 min per file
     const estimatedTimeSaved = 
       (documentsGenerated || 0) * 15 + 
       (aiAssists || 0) * 5 + 

@@ -1,15 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
+import { getSupabaseAdmin } from '@/lib/supabase-server'
 
 export const dynamic = 'force-dynamic'
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-)
-
 export async function POST(request: NextRequest) {
   try {
+    const supabase = getSupabaseAdmin()
     const { data: { user } } = await supabase.auth.getUser(
       request.cookies.get('sb-access-token')?.value || ''
     )
@@ -63,6 +59,7 @@ export async function POST(request: NextRequest) {
 
 async function addToTimeline(userId: string, caseId: string, type: string, metadata?: any) {
   try {
+    const supabase = getSupabaseAdmin()
     // Get or create timeline table entry
     // For now, we'll store timeline in case_tracker details JSON
     const { data: caseData } = await supabase

@@ -2,14 +2,8 @@
 
 import { createContext, useContext, useEffect, useState } from 'react'
 import { User } from '@supabase/supabase-js'
-import { createClient } from '@supabase/supabase-js'
+import { getSupabase } from '@/lib/supabase'
 import { getAvatarUrl } from '@/lib/avatar'
-
-// Create supabase client
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
 
 interface UserProfile {
   userId: string
@@ -65,6 +59,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setProfileLoading(true)
     
     try {
+      const supabase = getSupabase()
       const { data: { session } } = await supabase.auth.getSession()
       
       const response = await fetch('/api/user/profile', {
@@ -112,6 +107,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     
     const initAuth = async () => {
       try {
+        const supabase = getSupabase()
         const { data: { session } } = await supabase.auth.getSession()
         
         if (mounted) {
@@ -163,6 +159,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   const signInWithGoogle = async () => {
+    const supabase = getSupabase()
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
@@ -174,6 +171,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signOut = async () => {
     try {
+      const supabase = getSupabase()
       await supabase.auth.signOut()
       
       setUser(null)

@@ -1,17 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
+import { getSupabaseAdmin } from '@/lib/supabase-server'
 import { safeDbOperation } from '@/lib/prisma'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-)
-
 export async function GET(request: NextRequest) {
   try {
+    const supabase = getSupabaseAdmin()
+    
     // Get user from session
     const authHeader = request.headers.get('authorization')
     if (!authHeader) {
@@ -117,6 +114,7 @@ export async function GET(request: NextRequest) {
 
 export async function PUT(request: NextRequest) {
   try {
+    const supabase = getSupabaseAdmin()
     const { fullName, phone, organization } = await request.json()
     
     // Get user from session

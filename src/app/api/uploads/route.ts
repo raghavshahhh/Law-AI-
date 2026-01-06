@@ -1,11 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
+import { getSupabaseAdmin } from '@/lib/supabase-server'
 import { prisma } from '@/lib/prisma'
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
 
 // Extract text from PDF using simple parsing
 async function extractTextFromPDF(buffer: Buffer): Promise<string> {
@@ -54,6 +49,7 @@ export async function POST(request: NextRequest) {
     const filePath = `uploads/${userId || 'anonymous'}/${filename}`
 
     // Upload to Supabase Storage
+    const supabase = getSupabaseAdmin()
     const { data: uploadData, error: uploadError } = await supabase.storage
       .from('files')
       .upload(filePath, buffer, {

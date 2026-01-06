@@ -11,12 +11,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { useAuth } from '@/context/AuthContext'
 import { User, Lock, Bell, Palette, Save, Eye, EyeOff, X } from 'lucide-react'
 import { toast } from 'react-hot-toast'
-import { createClient } from '@supabase/supabase-js'
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
+import { getSupabase } from '@/lib/supabase'
 
 interface SettingsModalProps {
   open: boolean
@@ -76,6 +71,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
   // Load user settings from server
   const loadUserSettings = async () => {
     try {
+      const supabase = getSupabase()
       // Get auth token
       const { data: { session } } = await supabase.auth.getSession()
       if (!session?.access_token) return
@@ -106,6 +102,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
 
     setProfileLoading(true)
     try {
+      const supabase = getSupabase()
       // Get auth session
       const { data: { session } } = await supabase.auth.getSession()
       if (!session?.access_token) {
@@ -160,6 +157,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
 
     setPasswordLoading(true)
     try {
+      const supabase = getSupabase()
       // Update password directly with Supabase
       const { error } = await supabase.auth.updateUser({
         password: passwordForm.newPassword

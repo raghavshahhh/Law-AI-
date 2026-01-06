@@ -7,15 +7,9 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { createClient } from '@supabase/supabase-js'
+import { getSupabase } from '@/lib/supabase'
 import { toast } from 'react-hot-toast'
 import { Eye, EyeOff, Mail, Lock, User } from 'lucide-react'
-
-// Create supabase client for browser
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
 
 function SignupForm() {
   const [fullName, setFullName] = useState('')
@@ -43,6 +37,7 @@ function SignupForm() {
     setLoading(true)
 
     try {
+      const supabase = getSupabase()
       const { data, error } = await supabase.auth.signUp({
         email: email.trim(),
         password,
@@ -84,6 +79,7 @@ function SignupForm() {
   const handleGoogleSignup = async () => {
     setLoading(true)
     try {
+      const supabase = getSupabase()
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {

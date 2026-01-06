@@ -1,40 +1,32 @@
-import { createServerClient, type CookieOptions } from '@supabase/ssr'
+import { createClient, SupabaseClient } from '@supabase/supabase-js'
 
-// Server-side Supabase client
-export const createServerSupabaseClient = async () => {
-  const { cookies } = await import('next/headers')
-  const cookieStore = await cookies()
+// Lazy initialization to avoid build-time errors
+let supabaseAdmin: SupabaseClient | null = null
 
+export function getSupabaseAdmin(): SupabaseClient {
+  if (supabaseAdmin) return supabaseAdmin
+  
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY
   
   if (!url || !key) {
     throw new Error('Missing Supabase environment variables')
   }
+  
+  supabaseAdmin = createClient(url, key)
+  return supabaseAdmin
+}
 
-  return createServerClient(
-    url,
-    key,
-    {
-      cookies: {
-        get(name: string) {
-          return cookieStore.get(name)?.value
-        },
-        set(name: string, value: string, options: CookieOptions) {
-          try {
-            cookieStore.set({ name, value, ...options })
-          } catch (e) {
-            // Ignore in middleware
-          }
-        },
-        remove(name: string, options: CookieOptions) {
-          try {
-            cookieStore.set({ name, value: '', ...options })
-          } catch (e) {
-            // Ignore in middleware
-          }
-        },
-      },
-    }
-  )
+// For routes that need graceful fallback when DB is unavailable
+export function getSupabaseAdminSafe(): SupabaseClient | null {
+  try {
+    return getSupabaseAdmin()
+  } catch {
+    return null
+  }
+}
+
+// Alias for backward compatibility
+export async function createServerSupabaseClient(): Promise<SupabaseClient> {
+  return getSupabaseAdmin()
 }

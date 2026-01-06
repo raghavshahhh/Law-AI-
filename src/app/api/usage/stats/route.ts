@@ -1,15 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
+import { getSupabaseAdmin } from '@/lib/supabase-server'
 
 export const dynamic = 'force-dynamic'
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-)
-
 export async function GET(request: NextRequest) {
   try {
+    const supabase = getSupabaseAdmin()
+    
     // Get user from auth header
     const authHeader = request.headers.get('authorization')
     const token = authHeader?.replace('Bearer ', '') || request.cookies.get('sb-access-token')?.value
